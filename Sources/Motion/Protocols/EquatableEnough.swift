@@ -7,6 +7,7 @@
 
 import CoreGraphics
 import Foundation
+import RealModule
 import simd
 
 // MARK: - FloatingPointInitializable
@@ -40,7 +41,7 @@ public protocol EquatableEnough: Comparable {
      Declares whether or not something else is equal to `self` within a given tolerance.
      (e.g. a floating point value that is equal to another floating point value within a given epsilon)
      */
-    func approximatelyEqual(to: Self, epsilon: EpsilonType) -> Bool
+    func isApproximatelyEqual(to: Self, epsilon: EpsilonType) -> Bool
 
 }
 
@@ -85,9 +86,11 @@ public extension EquatableEnough where Self: FloatingPoint & FloatingPointInitia
     /**
      Declares whether or not something else is equal to `self` within a given tolerance.
      (e.g. a floating point value that is equal to another floating point value within a given epsilon)
+
+     Bridges to Swift Numerics' `isApproximatelyEqual` (https://github.com/schwa/ApproximateEquality/blob/main/Sources/ApproximateEquality/ApproximateEquality.swift).
      */
-    @inlinable func approximatelyEqual(to other: Self, epsilon: Self = .epsilon) -> Bool {
-        return abs(self - other) < epsilon
+    @inlinable func isApproximatelyEqual(to other: Self, epsilon: Self = .epsilon) -> Bool {
+        return isApproximatelyEqual(to: other, absoluteTolerance: epsilon, relativeTolerance: .zero)
     }
 
 }
@@ -113,116 +116,20 @@ public extension EquatableEnough where Self: FloatingPoint & FloatingPointInitia
     return copy
 }
 
-/*
- Note: These are probably not the most optimal, especially in the bigger SIMD types. I haven't yet figured out how to do an equality within a given tolerance across all values simultaneously, so for now it's just a `reduce`.
- In addition, having to write all of these generics is probably wrong, I just haven't gotten around to simplifying it all yet and doing performance tracing on the change / verifying specialization.
-
- Something like extension `EquatableEnough where Self: SupportedSIMD` would probably be better.
+/**
+ - Note: These are probably not the most optimal, especially in the bigger SIMD types. I haven't yet figured out how to do an equality within a given tolerance across all values simultaneously, so for now it's just an early return if anything isn't approximately equal.
 */
-extension SIMD2: EquatableEnough, Comparable where Scalar: FloatingPointInitializable & EquatableEnough {
+extension SupportedSIMD where Self: EquatableEnough & Comparable, Scalar: SupportedScalar {
 
-    /// Declares whether or not another `SIMD2` is equal to `self` within a given tolerance (epsilon).
-    @inlinable public func approximatelyEqual(to other: Self, epsilon: Scalar = .epsilon) -> Bool {
-        return self.indices.reduce(true) {
-            return $0 && self[$1].approximatelyEqual(to: other[$1], epsilon: epsilon)
+    @inlinable public func isApproximatelyEqual(to other: Self, epsilon: Scalar = .epsilon) -> Bool {
+        for i in 0..<indices.count {
+            let equal = self[i].isApproximatelyEqual(to: other[i], epsilon: epsilon)
+            if !equal {
+                return false
+            }
         }
-    }
 
-    /// Returns whether or not all values of `lhs` (individually, sequentially) are less than all values of `rhs` (following the same ordering as `lhs`).
-    @inlinable public static func < (lhs: Self, rhs: Self) -> Bool {
-        return all(lhs .< rhs)
-    }
-
-}
-
-
-extension SIMD3: EquatableEnough, Comparable where Scalar: FloatingPointInitializable & EquatableEnough {
-
-    /// Declares whether or not another `SIMD3` is equal to `self` within a given tolerance (epsilon).
-    @inlinable public func approximatelyEqual(to other: Self, epsilon: Scalar = .epsilon) -> Bool {
-        return self.indices.reduce(true) {
-            return $0 && self[$1].approximatelyEqual(to: other[$1], epsilon: epsilon)
-        }
-    }
-
-    /// Returns whether or not all values of `lhs` (individually, sequentially) are less than all values of `rhs` (following the same ordering as `lhs`).
-    @inlinable public static func < (lhs: Self, rhs: Self) -> Bool {
-        return all(lhs .< rhs)
-    }
-
-}
-
-extension SIMD4: EquatableEnough, Comparable where Scalar: FloatingPointInitializable & EquatableEnough {
-
-    /// Declares whether or not another `SIMD4` is equal to `self` within a given tolerance (epsilon).
-    @inlinable public func approximatelyEqual(to other: Self, epsilon: Scalar = .epsilon) -> Bool {
-        return self.indices.reduce(true) {
-            return $0 && self[$1].approximatelyEqual(to: other[$1], epsilon: epsilon)
-        }
-    }
-
-    /// Returns whether or not all values of `lhs` (individually, sequentially) are less than all values of `rhs` (following the same ordering as `lhs`).
-    @inlinable public static func < (lhs: Self, rhs: Self) -> Bool {
-        return all(lhs .< rhs)
-    }
-
-}
-
-extension SIMD8: EquatableEnough, Comparable where Scalar: FloatingPointInitializable & EquatableEnough {
-
-    /// Declares whether or not another `SIMD8` is equal to `self` within a given tolerance (epsilon).
-    @inlinable public func approximatelyEqual(to other: Self, epsilon: Scalar = .epsilon) -> Bool {
-        return self.indices.reduce(true) {
-            return $0 && self[$1].approximatelyEqual(to: other[$1], epsilon: epsilon)
-        }
-    }
-
-    /// Returns whether or not all values of `lhs` (individually, sequentially) are less than all values of `rhs` (following the same ordering as `lhs`).
-    @inlinable public static func < (lhs: Self, rhs: Self) -> Bool {
-        return all(lhs .< rhs)
-    }
-
-}
-
-extension SIMD16: EquatableEnough, Comparable where Scalar: FloatingPointInitializable & EquatableEnough {
-
-    /// Declares whether or not another `SIMD16` is equal to `self` within a given tolerance (epsilon).
-    @inlinable public func approximatelyEqual(to other: Self, epsilon: Scalar = .epsilon) -> Bool {
-        return self.indices.reduce(true) {
-            return $0 && self[$1].approximatelyEqual(to: other[$1], epsilon: epsilon)
-        }
-    }
-
-    /// Returns whether or not all values of `lhs` (individually, sequentially) are less than all values of `rhs` (following the same ordering as `lhs`).
-    @inlinable public static func < (lhs: Self, rhs: Self) -> Bool {
-        return all(lhs .< rhs)
-    }
-
-}
-
-extension SIMD32: EquatableEnough, Comparable where Scalar: FloatingPointInitializable & EquatableEnough {
-
-    /// Declares whether or not another `SIMD32` is equal to `self` within a given tolerance (epsilon).
-    @inlinable public func approximatelyEqual(to other: Self, epsilon: Scalar = .epsilon) -> Bool {
-        return self.indices.reduce(true) {
-            return $0 && self[$1].approximatelyEqual(to: other[$1], epsilon: epsilon)
-        }
-    }
-
-    /// Returns whether or not all values of `lhs` (individually, sequentially) are less than all values of `rhs` (following the same ordering as `lhs`).
-    @inlinable public static func < (lhs: Self, rhs: Self) -> Bool {
-        return all(lhs .< rhs)
-    }
-
-}
-
-extension SIMD64: EquatableEnough, Comparable where Scalar: FloatingPointInitializable & EquatableEnough {
-
-    /// Declares whether or not another `SIMD64` is equal to `self` within a given tolerance (epsilon).
-    @inlinable public func approximatelyEqual(to other: Self, epsilon: Scalar = .epsilon) -> Bool {
-        return self.indices.reduce(true) {
-            return $0 && self[$1].approximatelyEqual(to: other[$1], epsilon: epsilon)
-        }
+        return true
     }
 
     /// Returns whether or not all values of `lhs` (individually, sequentially) are less than all values of `rhs` (following the same ordering as `lhs`).

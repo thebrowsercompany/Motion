@@ -61,7 +61,7 @@ extension CAKeyframeAnimationEmittable {
         if let framerate = framerate {
             dt = 1.0 / TimeInterval(framerate)
         } else {
-            dt = 1.0 / TimeInterval(Animator.shared.preferredFramesPerSecond)
+            dt = 1.0 / TimeInterval(environment?.animator.preferredFramesPerSecond ?? 60)
         }
 
         var values = [AnyObject]()
@@ -87,12 +87,13 @@ extension SpringAnimation: CAKeyframeAnimationEmittable where Value: CAKeyframeA
     public func populateKeyframeAnimationData(dt: TimeInterval, values: inout [AnyObject], keyTimes: inout [NSNumber]) -> TimeInterval {
         var velocity = _velocity
         var value = _value
+        var previousValueDelta: Value.SIMDType? = nil
 
         var t = 0.0
         var hasResolved = false
         while !hasResolved {
-            tickOptimized(Value.SIMDType.Scalar(dt), spring: &spring, value: &value, toValue: &_toValue, velocity: &velocity, clampingRange: &_clampingRange)
-            let resolvedState = self.hasResolved(value: &value, epsilon: &resolvingEpsilon, toValue: &_toValue, velocity: &velocity)
+            tickOptimized(Value.SIMDType.Scalar(dt), spring: spring, value: &value, toValue: &_toValue, velocity: &velocity, clampingRange: &_clampingRange)
+            let resolvedState = self.hasResolved(value: &value, epsilon: &resolvingEpsilon, toValue: &_toValue, velocity: &velocity, previousValueDelta: &previousValueDelta)
 
             if resolvesUponReachingToValue {
                 hasResolved = resolvedState.valueResolved
@@ -109,6 +110,7 @@ extension SpringAnimation: CAKeyframeAnimationEmittable where Value: CAKeyframeA
 
         values.append(toValue.toKeyframeValue())
         keyTimes.append(t as NSNumber)
+        t += dt
 
         return t
     }
@@ -127,7 +129,7 @@ extension DecayAnimation: CAKeyframeAnimationEmittable where Value: CAKeyframeAn
         var t = 0.0
         var hasResolved = false
         while !hasResolved {
-            tickOptimized(Value.SIMDType.Scalar(dt), decay: &decay, value: &value, velocity: &velocity)
+            tickOptimized(Value.SIMDType.Scalar(dt), decay: decay, value: &value, velocity: &velocity)
             hasResolved = self.hasResolved(velocity: &velocity)
 
             let nsValue = Value(value).toKeyframeValue()
@@ -137,7 +139,9 @@ extension DecayAnimation: CAKeyframeAnimationEmittable where Value: CAKeyframeAn
             t += dt
         }
 
-        t -= dt
+        values.append(toValue.toKeyframeValue())
+        keyTimes.append(t as NSNumber)
+        t += dt
 
         return t
     }
@@ -156,7 +160,7 @@ extension BasicAnimation: CAKeyframeAnimationEmittable where Value: CAKeyframeAn
         var t = 0.0
         var hasResolved = false
         while !hasResolved {
-            tickOptimized(easingFunction: &easingFunction, range: &_range, fraction: Value.SIMDType.Scalar(t / duration), value: &value)
+            tickOptimized(easingFunction: easingFunction, range: &_range, fraction: Value.SIMDType.Scalar(t / duration), value: &value)
             hasResolved = self.hasResolved(value: &value, epsilon: &resolvingEpsilon, toValue: &_toValue)
 
             let nsValue = Value(value).toKeyframeValue()

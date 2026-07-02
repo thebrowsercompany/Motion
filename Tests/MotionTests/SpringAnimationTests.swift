@@ -133,13 +133,13 @@ final class SpringAnimationTests: XCTestCase {
         underDampedSpring.toValue = 10.0
         underDampedSpring.tick(frame: f)
 
-        XCTAssert(underDampedSpring.value.approximatelyEqual(to: 9.223))
+        XCTAssert(underDampedSpring.value.isApproximatelyEqual(to: 9.223))
 
         let criticallyDampedSpring = SpringAnimation<CGFloat>(response: 1.0, dampingRatio: 1.0)
         criticallyDampedSpring.toValue = 10.0
         criticallyDampedSpring.tick(frame: f)
 
-        XCTAssert(criticallyDampedSpring.value.approximatelyEqual(to: 8.210))
+        XCTAssert(criticallyDampedSpring.value.isApproximatelyEqual(to: 8.210))
 
         let overDampedSpring = SpringAnimation<CGFloat>(stiffness: 2.0, damping: 10.0)
         overDampedSpring.toValue = 10.0
@@ -205,6 +205,51 @@ final class SpringAnimationTests: XCTestCase {
         wait(for: [expectValueChangedCalled, expectCompletionCalled], timeout: 0.0)
     }
 
+    func testSpringResolvesUponReachingToValueCGFloat() {
+        let spring = SpringAnimation(initialValue: 0.0)
+        spring.toValue = 10.0
+        spring.resolvesUponReachingToValue = true
+
+        let expectCompletionCalled = XCTestExpectation(description: "Spring completed")
+
+        spring.onValueChanged { newValue in
+            if newValue > 10.0 {
+                XCTFail("Overshot and didn't resolve upon reaching toValue.")
+            }
+        }
+        spring.completion = {
+            expectCompletionCalled.fulfill()
+        }
+
+        tickAnimationForDuration(spring, maxDuration: 10.0)
+        spring.stop(resolveImmediately: true, postValueChanged: true)
+
+        wait(for: [expectCompletionCalled], timeout: 0.0)
+    }
+
+    func testSpringResolvesUponReachingToValueSIMD64Double() {
+        let spring = SpringAnimation(initialValue: SIMD64(repeating: 0.0))
+        spring.toValue = .init(repeating: 10.0)
+        spring.resolvesUponReachingToValue = true
+
+        let expectCompletionCalled = XCTestExpectation(description: "Spring completed")
+
+        spring.onValueChanged { newValue in
+            let check = newValue .> .init(repeating: 10.0)
+            if any(check) {
+                XCTFail("Overshot and didn't resolve upon reaching toValue.")
+            }
+        }
+        spring.completion = {
+            expectCompletionCalled.fulfill()
+        }
+
+        tickAnimationForDuration(spring, maxDuration: 10.0)
+        spring.stop(resolveImmediately: true, postValueChanged: true)
+
+        wait(for: [expectCompletionCalled], timeout: 0.0)
+    }
+
     // MARK: - CAKeyframeAnimationEmittable Tests
 
     func testCreateCAKeyframeAnimationFromSpringAnimation() {
@@ -212,12 +257,34 @@ final class SpringAnimationTests: XCTestCase {
         spring.toValue = CGRect(x: 0, y: 0, width: 320, height: 320)
         spring.configure(response: 1.0, dampingRatio: 1.0)
 
-        let keyframeAnimation = spring.keyframeAnimation()
+        let keyframeAnimation = spring.keyframeAnimation(forFramerate: 60)
 
         XCTAssertEqual(keyframeAnimation.calculationMode, .discrete)
         XCTAssertFalse(keyframeAnimation.values?.isEmpty ?? true)
         XCTAssertFalse(keyframeAnimation.keyTimes?.isEmpty ?? true)
-        XCTAssertTrue(keyframeAnimation.duration.approximatelyEqual(to: 2.383))
+        XCTAssertTrue(keyframeAnimation.duration.isApproximatelyEqual(to: 2.3999))
+    }
+
+    func testSpringToleratesDegenerateFrameDuration() {
+        // A display link that restarts (e.g. after sleep/wake) can deliver a non-finite or
+        // non-positive frame duration. Ticking with one must be a no-op rather than pushing the
+        // spring into a non-finite state (which traps when the value is read back).
+        let degenerateDurations: [(timestamp: CFTimeInterval, targetTimestamp: CFTimeInterval)] = [
+            (0.0, 0.0),
+            (100.0, 0.0),
+            (0.0, .infinity),
+            (0.0, .nan),
+        ]
+
+        for duration in degenerateDurations {
+            let spring = SpringAnimation<CGFloat>(response: 1.0, dampingRatio: 0.8)
+            spring.toValue = 10.0
+            spring.tick(frame: AnimationFrame(timestamp: duration.timestamp, targetTimestamp: duration.targetTimestamp))
+
+            XCTAssertTrue(spring.value.isFinite)
+            XCTAssertTrue(Double(spring._velocity).isFinite)
+            XCTAssertEqual(spring.value, 0.0)
+        }
     }
 
     override class func tearDown() {

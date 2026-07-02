@@ -11,7 +11,7 @@ Motion is an animation engine for gesturally-driven user interfaces, animations,
     - [Spring Animation](#spring-animation)
     - [Decay Animation](#decay-animation)
     - [Basic Animation](#basic-animation)
-- SwiftUI Support
+- [SwiftUI Support](#swiftui-support)
 - [Motion vs. Core Animation](#motion-vs-core-animation)
 - [Interruptibility](#interruptibility)
 - [SIMD](#simd)
@@ -121,7 +121,7 @@ Checkout the example project's [SwiftUI Demo](https://github.com/b3ll/Motion/blo
 
 # Motion vs. Core Animation
 
-Motion is not designed to be a general-purpose replacement for Core Animation. Core Animation animations are run in a special way, in another process, outside of your app and are designed to be smooth even when the main thread is being heavily used. Motion on the other head is all run in-process (like a game engine), and using it liberally without considering heavy stack traces, will result in poor performance and dropped frames. Motion itself is not slow (in fact it's really [fast](#performance)!), but calling methods to change view / layer properties or change layout at 60 FPS (or more) can be really taxing if not done carefully.
+Motion is not designed to be a general-purpose replacement for Core Animation. Core Animation animations are run in a special way, in another process, outside of your app and are designed to be smooth even when the main thread is being heavily used. Motion on the other hand is all run in-process (like a game engine), and using it liberally without considering heavy stack traces, will result in poor performance and dropped frames. Motion itself is not slow (in fact it's really [fast](#performance)!), but calling methods to change view / layer properties or change layout at 60 FPS (or more) can be really taxing if not done carefully.
 
 **tl;dr**: Treat Motion animations as you would a `UIScrollView` (since scrolling animations behave the same way). If you have too much going on in your `UIScrollView` it'll lag when it scrolls; the same applies to Motion.
 
@@ -321,4 +321,4 @@ If you have any questions, or want to learn more, feel free to ask me anything!
 
 # Contact Info
 
-Feel free to follow me on twitter: [@b3ll](https://www.twitter.com/b3ll)!
+Feel free to follow me on Mastodon: [@b3ll](https://www.mastodon.social/@b3ll)!

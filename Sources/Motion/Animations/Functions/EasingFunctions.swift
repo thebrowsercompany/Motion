@@ -54,7 +54,7 @@ public struct EasingFunction<Value: SIMDRepresentable>: Hashable {
 
      - Returns: An interpolated SIMD value between the supplied range's bounds based on a fraction (from 0.0 to 1.0) of the easing function.
      */
-    @inlinable public func solveInterpolatedValueSIMD(_ range: ClosedRange<Value.SIMDType>, fraction: Value.SIMDType.Scalar) -> Value.SIMDType {
+    @inlinable public func solveInterpolatedValueSIMD<SIMDType: SupportedSIMD>(_ range: ClosedRange<SIMDType>, fraction: SIMDType.Scalar) -> SIMDType where SIMDType.Scalar == Value.SIMDType.Scalar {
         let x = bezier.solve(x: fraction)
 
         let min = range.lowerBound
@@ -80,7 +80,7 @@ public struct EasingFunction<Value: SIMDRepresentable>: Hashable {
     @inlinable internal func solveAccumulatedTimeSIMD(_ range: ClosedRange<Value.SIMDType>, value: Value.SIMDType) -> CFTimeInterval? {
         guard let usableIndex = value.indices.first(where: { i -> Bool in
             let fractionComplete = value[i] / (range.upperBound[i] - range.lowerBound[i])
-            return !(fractionComplete.approximatelyEqual(to: 0.0) || fractionComplete.approximatelyEqual(to: 1.0))
+            return !(fractionComplete.isApproximatelyEqual(to: 0.0) || fractionComplete.isApproximatelyEqual(to: 1.0))
         }) else { return nil }
 
         let fractionComplete = value[usableIndex] / (range.upperBound[usableIndex] - range.lowerBound[usableIndex])

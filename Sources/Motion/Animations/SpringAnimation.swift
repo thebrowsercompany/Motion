@@ -141,10 +141,11 @@ public final class SpringAnimation<Value: SIMDRepresentable>: ValueAnimation<Val
 
      - Parameters:
         - initialValue: The value to start animating from.
+        - environment: The ``AnimationEnvironment`` where this animation will run.
      */
-    public init(initialValue: Value = .zero) {
+    public init(initialValue: Value = .zero, environment: AnimationEnvironment = .default) {
         self.spring = SpringFunction()
-        super.init()
+        super.init(environment: environment)
         self.value = initialValue
     }
 
@@ -154,9 +155,10 @@ public final class SpringAnimation<Value: SIMDRepresentable>: ValueAnimation<Val
      - Parameters:
         - stiffness: How stiff the spring should be.
         - damping: How much friction should be exerted on the spring.
+        - environment: The ``AnimationEnvironment`` where this animation will run.
      */
-    public convenience init(initialValue: Value = .zero, stiffness: Value.SIMDType.Scalar, damping: Value.SIMDType.Scalar) {
-        self.init(initialValue: initialValue)
+    public convenience init(initialValue: Value = .zero, stiffness: Value.SIMDType.Scalar, damping: Value.SIMDType.Scalar, environment: AnimationEnvironment = .default) {
+        self.init(initialValue: initialValue, environment: environment)
         configure(stiffness: stiffness, damping: damping)
     }
 
@@ -170,11 +172,12 @@ public final class SpringAnimation<Value: SIMDRepresentable>: ValueAnimation<Val
           - `0.0`: An infinitely oscillating spring.
           - `1.0`: A critically damped spring.
           - `0.0 < value > 1.0`: An underdamped spring.
+        - environment: The ``AnimationEnvironment`` where this animation will run.
 
      - Note: For more information on how these values work, check out the WWDC talk on fluid animations: https://developer.apple.com/videos/play/wwdc2018/803/.
      */
-    public convenience init(initialValue: Value = .zero, response: Value.SIMDType.Scalar, dampingRatio: Value.SIMDType.Scalar) {
-        self.init(initialValue: initialValue)
+    public convenience init(initialValue: Value = .zero, response: Value.SIMDType.Scalar, dampingRatio: Value.SIMDType.Scalar, environment: AnimationEnvironment = .default) {
+        self.init(initialValue: initialValue, environment: environment)
         configure(response: response, dampingRatio: dampingRatio)
     }
 
@@ -209,24 +212,45 @@ public final class SpringAnimation<Value: SIMDRepresentable>: ValueAnimation<Val
 
     /// Returns whether or not the spring animation has resolved. It is considered resolved when the `toValue` is reached, and `velocity` is zero.
     public override func hasResolved() -> Bool {
-        let resolvedState = hasResolved(value: &_value, epsilon: &resolvingEpsilon, toValue: &_toValue, velocity: &_velocity)
+        var previousValueDelta: Value.SIMDType? = nil
+        let resolvedState = hasResolved(value: &_value, epsilon: &resolvingEpsilon, toValue: &_toValue, velocity: &_velocity, previousValueDelta: &previousValueDelta)
         return resolvedState.valueResolved && resolvedState.velocityResolved
     }
 
     #if DEBUG
-    internal func hasResolved<SIMDType: SupportedSIMD>(value: inout SIMDType, epsilon: inout SIMDType.EpsilonType, toValue: inout SIMDType, velocity: inout SIMDType) -> (valueResolved: Bool, velocityResolved: Bool) {
+    internal func hasResolved<SIMDType: SupportedSIMD>(value: inout SIMDType, epsilon: inout SIMDType.EpsilonType, toValue: inout SIMDType, velocity: inout SIMDType, previousValueDelta: inout SIMDType?) -> (valueResolved: Bool, velocityResolved: Bool) {
         /* Must Be Mirrored Below */
 
-        let valueResolved = value.approximatelyEqual(to: toValue, epsilon: epsilon)
-        if !valueResolved {
+        let valueResolved = value.isApproximatelyEqual(to: toValue, epsilon: epsilon)
+        if !valueResolved, !resolvesUponReachingToValue {
             return (false, false)
         }
 
-        if resolvesUponReachingToValue {
-            return (valueResolved, true)
+        if resolvesUponReachingToValue, !valueResolved, let previousValueDelta = previousValueDelta {
+            let currentValueDelta = toValue - value
+            let hasReachedOrExceededToValue = {
+                var index = 0
+                let count = currentValueDelta.scalarCount
+                var allValuesReachedOrExceededToValues = true
+                while index < count, allValuesReachedOrExceededToValues {
+                    /**
+                     - Note: An overshoot has happened once the sign of the value before executing the spring is different than the sign of the value after the spring
+
+                     For example: `SpringAnimation<CGFloat>` animating with `toValue` of 0.0, starting at 1.0, will have a value of ~0.1 on one frame, the next frame it could be either 0.0 or -0.1, in which case either the values have been reached or exeeded (sign changed from + to -).
+                     */
+                    allValuesReachedOrExceededToValues = allValuesReachedOrExceededToValues &&
+                    (previousValueDelta[index].sign != currentValueDelta[index].sign) || (value[index].isApproximatelyEqual(to: toValue[index], epsilon: 0.01))
+
+                    index += 1
+                }
+
+                return allValuesReachedOrExceededToValues
+            }()
+
+            return (hasReachedOrExceededToValue, true)
         }
 
-        let velocityResolved = velocity.approximatelyEqual(to: .zero, epsilon: epsilon)
+        let velocityResolved = velocity.isApproximatelyEqual(to: .zero, epsilon: epsilon)
         return (valueResolved, velocityResolved)
     }
     #else
@@ -244,19 +268,39 @@ public final class SpringAnimation<Value: SIMDRepresentable>: ValueAnimation<Val
     @_specialize(kind: partial, where SIMDType == SIMD32<Double>)
     @_specialize(kind: partial, where SIMDType == SIMD64<Float>)
     @_specialize(kind: partial, where SIMDType == SIMD64<Double>)
-    internal func hasResolved<SIMDType: SupportedSIMD>(value: inout SIMDType, epsilon: inout SIMDType.EpsilonType, toValue: inout SIMDType, velocity: inout SIMDType) -> (valueResolved: Bool, velocityResolved: Bool) {
+    internal func hasResolved<SIMDType: SupportedSIMD>(value: inout SIMDType, epsilon: inout SIMDType.EpsilonType, toValue: inout SIMDType, velocity: inout SIMDType, previousValueDelta: inout SIMDType?) -> (valueResolved: Bool, velocityResolved: Bool) {
         /* Must Be Mirrored Above */
         
-        let valueResolved = value.approximatelyEqual(to: toValue, epsilon: epsilon)
-        if !valueResolved {
+        let valueResolved = value.isApproximatelyEqual(to: toValue, epsilon: epsilon)
+        if !valueResolved, !resolvesUponReachingToValue {
             return (false, false)
         }
 
-        if resolvesUponReachingToValue {
-            return (valueResolved, true)
+        if resolvesUponReachingToValue, !valueResolved, let previousValueDelta = previousValueDelta {
+            let currentValueDelta = toValue - value
+            let hasReachedOrExceededToValue = {
+                var index = 0
+                let count = currentValueDelta.scalarCount
+                var allValuesReachedOrExceededToValues = true
+                while index < count, allValuesReachedOrExceededToValues {
+                    /**
+                     - Note: An overshoot has happened once the sign of the value before executing the spring is different than the sign of the value after the spring
+
+                     For example: `SpringAnimation<CGFloat>` animating with `toValue` of 0.0, starting at 1.0, will have a value of ~0.1 on one frame, the next frame it could be either 0.0 or -0.1, in which case either the values have been reached or exeeded (sign changed from + to -).
+                     */
+                    allValuesReachedOrExceededToValues = allValuesReachedOrExceededToValues &&
+                    (previousValueDelta[index].sign != currentValueDelta[index].sign) || (value[index].isApproximatelyEqual(to: toValue[index], epsilon: 0.01))
+
+                    index += 1
+                }
+
+                return allValuesReachedOrExceededToValues
+            }()
+
+            return (hasReachedOrExceededToValue, true)
         }
 
-        let velocityResolved = velocity.approximatelyEqual(to: .zero, epsilon: epsilon)
+        let velocityResolved = velocity.isApproximatelyEqual(to: .zero, epsilon: epsilon)
         return (valueResolved, velocityResolved)
     }
     #endif
@@ -276,11 +320,27 @@ public final class SpringAnimation<Value: SIMDRepresentable>: ValueAnimation<Val
     // MARK: - AnimationDriverObserver
 
     public override func tick(frame: AnimationFrame) {
-        tickOptimized(Value.SIMDType.Scalar(frame.duration), spring: &spring, value: &_value, toValue: &_toValue, velocity: &_velocity, clampingRange: &_clampingRange)
+        // A display link that restarts (e.g. after the screen sleeps and wakes) can deliver a
+        // non-finite or non-positive frame duration. Feeding that into the spring solver produces
+        // non-finite state, which traps when the value is read back. Skip such degenerate frames.
+        let dt = frame.duration
+        guard dt.isFinite, dt > 0.0 else { return }
 
-        _valueChanged?(value)
+        // This subtraction here makes it approx 13%! slower
+        // Conditional negates it.
+        var previousValueDelta: Value.SIMDType?
+        if resolvesUponReachingToValue {
+            previousValueDelta = _toValue - _value
+        } else {
+            previousValueDelta = nil
+        }
 
-        let resolvedState = hasResolved(value: &_value, epsilon: &resolvingEpsilon, toValue: &_toValue, velocity: &_velocity)
+        tickOptimized(Value.SIMDType.Scalar(dt), spring: spring, value: &_value, toValue: &_toValue, velocity: &_velocity, clampingRange: &_clampingRange)
+
+        let resolvedState = hasResolved(value: &_value, epsilon: &resolvingEpsilon, toValue: &_toValue, velocity: &_velocity, previousValueDelta: &previousValueDelta)
+        if !resolvedState.valueResolved || !resolvedState.velocityResolved {
+            _valueChanged?(value)
+        }
 
         if resolvedState.valueResolved && resolvedState.velocityResolved {
             stop()
@@ -300,12 +360,12 @@ public final class SpringAnimation<Value: SIMDRepresentable>: ValueAnimation<Val
      Note that this optimization only happens on Release builds as building constantly for Debug is fairly slow.
      */
     #if DEBUG
-    internal func tickOptimized<SIMDType: SupportedSIMD>(_ dt: SIMDType.Scalar, spring: inout SpringFunction<SIMDType>, value: inout SIMDType, toValue: inout SIMDType, velocity: inout SIMDType, clampingRange: inout ClosedRange<SIMDType>?) where SIMDType.Scalar == SIMDType.SIMDType.Scalar {
+    internal func tickOptimized<SIMDType: SupportedSIMD>(_ dt: SIMDType.Scalar, spring: SpringFunction<SIMDType>, value: inout SIMDType, toValue: inout SIMDType, velocity: inout SIMDType, clampingRange: inout ClosedRange<SIMDType>?) where SIMDType.Scalar == SIMDType.SIMDType.Scalar, SIMDType == SIMDType.SIMDType {
         /* Must Be Mirrored Below */
 
         let x0 = toValue - value
 
-        let x = spring.solve(dt: dt, x0: x0, velocity: &velocity)
+        let x = spring.solveSIMD(dt: dt, x0: x0, velocity: &velocity)
 
         value = toValue - x
 
@@ -328,12 +388,12 @@ public final class SpringAnimation<Value: SIMDRepresentable>: ValueAnimation<Val
     @_specialize(kind: partial, where SIMDType == SIMD32<Double>)
     @_specialize(kind: partial, where SIMDType == SIMD64<Float>)
     @_specialize(kind: partial, where SIMDType == SIMD64<Double>)
-    internal func tickOptimized<SIMDType: SupportedSIMD>(_ dt: SIMDType.Scalar, spring: inout SpringFunction<SIMDType>, value: inout SIMDType, toValue: inout SIMDType, velocity: inout SIMDType, clampingRange: inout ClosedRange<SIMDType>?) where SIMDType.Scalar == SIMDType.SIMDType.Scalar {
+    internal func tickOptimized<SIMDType: SupportedSIMD>(_ dt: SIMDType.Scalar, spring: SpringFunction<SIMDType>, value: inout SIMDType, toValue: inout SIMDType, velocity: inout SIMDType, clampingRange: inout ClosedRange<SIMDType>?) where SIMDType.Scalar == SIMDType.SIMDType.Scalar, SIMDType == SIMDType.SIMDType {
         /* Must Be Mirrored Above */
 
         let x0 = toValue - value
 
-        let x = spring.solve(dt: dt, x0: x0, velocity: &velocity)
+        let x = spring.solveSIMD(dt: dt, x0: x0, velocity: &velocity)
 
         value = toValue - x
 

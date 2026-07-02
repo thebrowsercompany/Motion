@@ -15,6 +15,10 @@ protocol AnimationDriverObserver: AnyObject {
     func tick(frame: AnimationFrame)
 }
 
+#if os(visionOS)
+fileprivate let MaxFPSVisionOS = 90 // TODO: Hardcoded until I find a better API to query.
+#endif
+
 #if canImport(UIKit)
 import UIKit
 
@@ -39,20 +43,26 @@ final class CoreAnimationDriver: AnimationDriver {
         // Find the first connected scene that's a UIWindowScene and is active, then find the highest supported refresh rate.
         let connectedScenes = UIApplication.shared.connectedScenes
         let windowScene = connectedScenes.first { ($0 as? UIWindowScene)?.activationState == .foregroundActive } as? UIWindowScene
+
+        #if os(visionOS)
+        let maxFPS = Float(MaxFPSVisionOS) // TODO: Hardcoded until I find a better API to query.
+        #else
         let maxFPS = Float(windowScene?.windows.map { $0.screen.maximumFramesPerSecond }.max() ?? 60)
+        #endif
 
         /**
          If we've got a high refresh display, we can use 80 as a minimum.
          https://developer.apple.com/documentation/quartzcore/optimizing_promotion_refresh_rates_for_iphone_13_pro_and_ipad_pro
 
-         - Note: We choose 80 as a minimum to be considered high refresh rate, since some devices will erronously report 61fps as a maximum (see: https://github.com/b3ll/Motion/issues/25)
+         - Note: We choose 80 as a minimum to be considered high refresh rate, since some devices will erronously report 61fps as a maximum (see: https://github.com/b3ll/Motion/issues/25). We also have the guard against the minimum being below the maximum because tvOS can run at less than 60fps.
          */
-        let adjustedMinFPS: Float = maxFPS > 80.0 ? 80.0 : 60.0
-
+        let baseMinFPS: Float = maxFPS > 80.0 ? 80.0 : 60.0
+		let adjustedMinFPS = min(baseMinFPS, maxFPS)
+		
         return CAFrameRateRange(minimum: adjustedMinFPS, maximum: maxFPS, preferred: maxFPS)
     }
 
-    init?() {
+    init?(environment: AnimationEnvironment) {
         displayLink = CADisplayLink(target: self, selector: #selector(tick))
         displayLink.add(to: .main, forMode: .common)
         if #available(iOS 15.0, tvOS 15.0, *) {
@@ -79,7 +89,11 @@ final class CoreAnimationDriver: AnimationDriver {
     var preferredFramesPerSecond: Int {
         let fps = displayLink.preferredFramesPerSecond
         if fps == 0 {
+            #if os(visionOS)
+            return MaxFPSVisionOS
+            #else
             return UIScreen.main.maximumFramesPerSecond
+            #endif
         } else {
             return fps
         }
@@ -108,10 +122,21 @@ final class CoreVideoDriver: AnimationDriver {
     private var displaylink: CVDisplayLink!
     private var nextFrame: Synchronized<AnimationFrame?> = .init(data: nil)
 
-    init?() {
+    let preferredFramesPerSecond: Int
+
+    init?(environment: AnimationEnvironment) {
+        self.preferredFramesPerSecond = environment.preferredFramesPerSecond
         var displayLinkRef: CVDisplayLink? = nil
-        var successLink = CVDisplayLinkCreateWithActiveCGDisplays(&displayLinkRef)
-        
+        var successLink: CVReturn
+
+        if let displayID = environment.displayID {
+            successLink = CVDisplayLinkCreateWithCGDisplay(displayID, &displayLinkRef)
+        } else {
+            // Should this be a precondition instead? 🤔
+            assertionFailure("CoreVideoDriver needs environment to provide a valid CGDirectDisplayID")
+            successLink = CVDisplayLinkCreateWithActiveCGDisplays(&displayLinkRef)
+        }
+
         if let displaylink = displayLinkRef {
             successLink = CVDisplayLinkSetOutputCallback(displaylink, { (displaylink, currentTime, outputTime, _, _, context) -> CVReturn in
                 if let context = context {
@@ -148,8 +173,6 @@ final class CoreVideoDriver: AnimationDriver {
     deinit {
         isPaused = true
     }
-
-    let preferredFramesPerSecond: Int = 60
     
     weak var observer: AnimationDriverObserver?
 
