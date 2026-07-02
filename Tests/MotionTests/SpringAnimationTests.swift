@@ -265,6 +265,28 @@ final class SpringAnimationTests: XCTestCase {
         XCTAssertTrue(keyframeAnimation.duration.isApproximatelyEqual(to: 2.3999))
     }
 
+    func testSpringToleratesDegenerateFrameDuration() {
+        // A display link that restarts (e.g. after sleep/wake) can deliver a non-finite or
+        // non-positive frame duration. Ticking with one must be a no-op rather than pushing the
+        // spring into a non-finite state (which traps when the value is read back).
+        let degenerateDurations: [(timestamp: CFTimeInterval, targetTimestamp: CFTimeInterval)] = [
+            (0.0, 0.0),
+            (100.0, 0.0),
+            (0.0, .infinity),
+            (0.0, .nan),
+        ]
+
+        for duration in degenerateDurations {
+            let spring = SpringAnimation<CGFloat>(response: 1.0, dampingRatio: 0.8)
+            spring.toValue = 10.0
+            spring.tick(frame: AnimationFrame(timestamp: duration.timestamp, targetTimestamp: duration.targetTimestamp))
+
+            XCTAssertTrue(spring.value.isFinite)
+            XCTAssertTrue(Double(spring._velocity).isFinite)
+            XCTAssertEqual(spring.value, 0.0)
+        }
+    }
+
     override class func tearDown() {
         // All the animations should be deallocated by now. Hopefully NSMapTable plays nice.
         XCTAssert(Animator.shared.runningAnimations.allObjects.count == 0)

@@ -320,6 +320,12 @@ public final class SpringAnimation<Value: SIMDRepresentable>: ValueAnimation<Val
     // MARK: - AnimationDriverObserver
 
     public override func tick(frame: AnimationFrame) {
+        // A display link that restarts (e.g. after the screen sleeps and wakes) can deliver a
+        // non-finite or non-positive frame duration. Feeding that into the spring solver produces
+        // non-finite state, which traps when the value is read back. Skip such degenerate frames.
+        let dt = frame.duration
+        guard dt.isFinite, dt > 0.0 else { return }
+
         // This subtraction here makes it approx 13%! slower
         // Conditional negates it.
         var previousValueDelta: Value.SIMDType?
@@ -329,7 +335,7 @@ public final class SpringAnimation<Value: SIMDRepresentable>: ValueAnimation<Val
             previousValueDelta = nil
         }
 
-        tickOptimized(Value.SIMDType.Scalar(frame.duration), spring: spring, value: &_value, toValue: &_toValue, velocity: &_velocity, clampingRange: &_clampingRange)
+        tickOptimized(Value.SIMDType.Scalar(dt), spring: spring, value: &_value, toValue: &_toValue, velocity: &_velocity, clampingRange: &_clampingRange)
 
         let resolvedState = hasResolved(value: &_value, epsilon: &resolvingEpsilon, toValue: &_toValue, velocity: &_velocity, previousValueDelta: &previousValueDelta)
         if !resolvedState.valueResolved || !resolvedState.velocityResolved {
